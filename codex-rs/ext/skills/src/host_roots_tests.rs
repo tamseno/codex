@@ -401,11 +401,27 @@ async fn repo_ancestry_without_project_marker_does_not_walk_parents() {
     fs::create_dir_all(outer.join(".agents/skills")).expect("create outer skills");
     fs::create_dir_all(cwd.join(".agents/skills")).expect("create cwd skills");
 
-    let roots = repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &stack(Vec::new()), &cwd)
-        .await
-        .into_iter()
-        .map(|root| root.path)
-        .collect::<Vec<_>>();
+    let mut table = toml::map::Map::new();
+    table.insert(
+        "project_root_markers".to_string(),
+        toml::Value::Array(vec![toml::Value::String(
+            ".test-missing-marker-uuid".to_string(),
+        )]),
+    );
+    let user_entry = ConfigLayerEntry::new(
+        ConfigLayerSource::User {
+            file: outer.join("config.toml"),
+            profile: None,
+        },
+        toml::Value::Table(table),
+    );
+
+    let roots =
+        repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &stack(vec![user_entry]), &cwd)
+            .await
+            .into_iter()
+            .map(|root| root.path)
+            .collect::<Vec<_>>();
 
     assert_eq!(roots, vec![cwd.join(".agents/skills")]);
 }

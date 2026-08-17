@@ -24,6 +24,7 @@ const AGENTS_DIR_NAME: &str = ".agents";
 const SKILLS_DIR_NAME: &str = "skills";
 const MAX_CONCURRENT_ANCESTOR_PROBES: usize = 256;
 
+#[allow(dead_code)]
 pub(crate) async fn resolve_skill_roots(
     repository_file_system: Option<Arc<dyn ExecutorFileSystem>>,
     config_layer_stack: &ConfigLayerStack,
@@ -44,7 +45,7 @@ pub(crate) async fn resolve_skill_roots(
     .await
 }
 
-async fn resolve_skill_roots_with_home_dir(
+pub(crate) async fn resolve_skill_roots_with_home_dir(
     repository_file_system: Option<Arc<dyn ExecutorFileSystem>>,
     config_layer_stack: &ConfigLayerStack,
     cwd: &AbsolutePathBuf,

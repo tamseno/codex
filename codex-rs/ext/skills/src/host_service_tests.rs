@@ -172,7 +172,8 @@ async fn skills_for_config_with_stack(
         cwd.path().abs(),
         effective_skill_roots.to_vec(),
         config_layer_stack.clone(),
-    );
+    )
+    .with_home_dir(None);
     skills_service
         .snapshot_for_config(&skills_input, Some(Arc::clone(&LOCAL_FS)))
         .await
@@ -225,7 +226,8 @@ async fn watchable_skill_root_paths_exclude_plugin_and_system_roots() {
         cwd.path().abs(),
         vec![plugin_skill_root.clone()],
         config_layer_stack,
-    );
+    )
+    .with_home_dir(None);
     let skills_service = HostSkillsService::new(
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ true,
@@ -260,7 +262,8 @@ async fn snapshot_for_config_merges_extension_host_and_legacy_plugin_roots() {
         cwd.path().abs(),
         vec![plugin_skill_root],
         config_layer_stack,
-    );
+    )
+    .with_home_dir(None);
     let skills_service = HostSkillsService::new(
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ false,
@@ -355,6 +358,7 @@ async fn skills_list_snapshots_share_host_roots_only_within_one_request() {
     let request = skills_service.for_request();
     let input = |cwd: &TempDir, config_layer_stack| {
         HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack)
+            .with_home_dir(None)
     };
 
     write_user_skill(&codex_home, "first", "first-skill", "first skill");
@@ -497,7 +501,8 @@ async fn set_extra_roots_replaces_runtime_roots_and_clears_cache() {
     );
 
     let skills_input =
-        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack.clone());
+        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack.clone())
+            .with_home_dir(None);
     let empty_snapshot = skills_service
         .for_request()
         .snapshot_for_cwd(
@@ -688,7 +693,8 @@ async fn skills_for_cwd_loads_repo_and_user_roots_with_local_fs() {
     )
     .expect("valid config layer stack");
     let skills_input =
-        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack.clone());
+        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack.clone())
+            .with_home_dir(None);
     let skills_service = HostSkillsService::new(
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ true,
@@ -755,7 +761,8 @@ async fn skills_for_cwd_without_fs_skips_repo_roots() {
     )
     .expect("valid config layer stack");
     let skills_input =
-        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack.clone());
+        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack.clone())
+            .with_home_dir(None);
     let skills_service = HostSkillsService::new(
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ true,
@@ -824,7 +831,8 @@ async fn skills_for_cwd_uses_cached_result_until_force_reload() {
         /*bundled_skills_enabled*/ true,
     );
     let base_input =
-        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack.clone());
+        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack.clone())
+            .with_home_dir(None);
     let config_input = base_input
         .clone()
         .with_plugin_skill_snapshots(Some(test_plugin_skill_snapshots()));
@@ -905,7 +913,8 @@ async fn skills_for_config_ignores_cwd_cache_when_session_flags_reenable_skill()
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ true,
     );
-    let parent_input = HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), parent_stack.clone());
+    let parent_input = HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), parent_stack.clone())
+        .with_home_dir(None);
 
     let parent_snapshot = skills_service
         .for_request()
@@ -931,4 +940,79 @@ async fn skills_for_config_ignores_cwd_cache_when_session_flags_reenable_skill()
         .find(|skill| skill.name == "demo-skill")
         .expect("demo skill should be discovered");
     assert_eq!(child_outcome.is_skill_enabled(child_skill), true);
+}
+
+#[tokio::test]
+async fn host_skills_service_isolates_user_home_override() {
+    let codex_home = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+    let fake_home = TempDir::new().unwrap();
+    let skills_service = HostSkillsService::new(codex_home.path().abs(), false);
+
+    let fake_home_skills = fake_home
+        .path()
+        .join(".agents")
+        .join("skills")
+        .join("isolated-skill");
+    fs::create_dir_all(&fake_home_skills).unwrap();
+    fs::write(
+        fake_home_skills.join("SKILL.md"),
+        "---\nname: isolated-skill\ndescription: isolated\n---\n\n# Body\n",
+    )
+    .unwrap();
+
+    let config_layer_stack = ConfigLayerStack::new(
+        vec![ConfigLayerEntry::new(
+            ConfigLayerSource::User {
+                file: codex_home.path().join(CONFIG_TOML_FILE).abs(),
+                profile: None,
+            },
+            codex_config::TomlValue::Table(toml::Table::new()),
+        )],
+        Default::default(),
+        ConfigRequirementsToml::default(),
+    )
+    .unwrap();
+
+    let input_with_fake_home =
+        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack.clone())
+            .with_home_dir(Some(fake_home.path().abs()));
+
+    let snapshot = skills_service
+        .for_request()
+        .snapshot_for_cwd(
+            &input_with_fake_home,
+            /*force_reload*/ true,
+            Some(Arc::clone(&LOCAL_FS)),
+        )
+        .await;
+    assert!(
+        snapshot
+            .outcome()
+            .skills
+            .iter()
+            .any(|s| s.name == "isolated-skill"),
+        "expected isolated-skill to be found from fake_home"
+    );
+
+    let input_without_home =
+        HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack)
+            .with_home_dir(None);
+
+    let snapshot_empty = skills_service
+        .for_request()
+        .snapshot_for_cwd(
+            &input_without_home,
+            /*force_reload*/ true,
+            Some(Arc::clone(&LOCAL_FS)),
+        )
+        .await;
+    assert!(
+        !snapshot_empty
+            .outcome()
+            .skills
+            .iter()
+            .any(|s| s.name == "isolated-skill"),
+        "expected isolated-skill not to leak when home_dir is None"
+    );
 }
