@@ -293,6 +293,20 @@ fn build_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
 
 const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 
+const PROXY_ENV_KEYS: &[&str] = &[
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "WS_PROXY",
+    "WSS_PROXY",
+    "FTP_PROXY",
+];
+
+fn is_proxy_env_key(key: &str) -> bool {
+    PROXY_ENV_KEYS.iter().any(|k| k.eq_ignore_ascii_case(key))
+}
+
 /// Load env vars from ~/.codex/.env.
 ///
 /// Security: Do not allow `.env` files to create or modify any variables
@@ -312,6 +326,9 @@ where
 {
     for (key, value) in iter.into_iter().flatten() {
         if !key.to_ascii_uppercase().starts_with(ILLEGAL_ENV_VAR_PREFIX) {
+            if is_proxy_env_key(&key) {
+                tracing::info!(key = %key, "loaded proxy environment variable from .env");
+            }
             // It is safe to call set_var() because our process is
             // single-threaded at this point in its execution.
             unsafe { std::env::set_var(&key, &value) };
@@ -749,5 +766,16 @@ mod tests {
 
         assert!(!dir.exists());
         Ok(())
+    }
+
+    #[test]
+    fn proxy_env_key_detection() {
+        assert!(super::is_proxy_env_key("HTTP_PROXY"));
+        assert!(super::is_proxy_env_key("http_proxy"));
+        assert!(super::is_proxy_env_key("HTTPS_PROXY"));
+        assert!(super::is_proxy_env_key("ALL_PROXY"));
+        assert!(super::is_proxy_env_key("NO_PROXY"));
+        assert!(!super::is_proxy_env_key("SOME_OTHER_KEY"));
+        assert!(!super::is_proxy_env_key("CODEX_API_KEY"));
     }
 }
