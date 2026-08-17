@@ -374,6 +374,30 @@ fn deserialize_streamable_http_server_config_with_oauth_client_id() {
         Some(McpServerOAuthConfig {
             client_id: Some("eci-prd-pub-codex-123".to_string()),
             callback_port: Some(9876),
+            expected_issuer: None,
+        })
+    );
+}
+
+#[test]
+fn oauth_config_deserializes_expected_issuer() {
+    let cfg: McpServerConfig = toml::from_str(
+        r#"
+            url = "https://mcp.facebook.com/ads"
+
+            [oauth]
+            client_id = "meta-app-123"
+            expected_issuer = "https://www.facebook.com"
+        "#,
+    )
+    .expect("should deserialize http config with expected issuer");
+
+    assert_eq!(
+        cfg.oauth,
+        Some(McpServerOAuthConfig {
+            client_id: Some("meta-app-123".to_string()),
+            callback_port: None,
+            expected_issuer: Some("https://www.facebook.com".to_string()),
         })
     );
 }

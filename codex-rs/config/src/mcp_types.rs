@@ -149,6 +149,10 @@ pub struct McpServerOAuthConfig {
     /// Fixed callback port that takes precedence over Codex's global OAuth callback port.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callback_port: Option<u16>,
+
+    /// Explicit trusted OAuth issuer URL when authorization server metadata differs from server URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_issuer: Option<String>,
 }
 
 /// Authentication flow Codex attempts after resolving an HTTP MCP server's
