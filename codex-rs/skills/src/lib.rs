@@ -88,6 +88,7 @@ pub fn install_system_skills(codex_home: &AbsolutePathBuf) -> Result<(), SystemS
     let expected_fingerprint = embedded_system_skills_fingerprint();
     if dest_system.as_path().is_dir()
         && read_marker(&marker_path).is_ok_and(|marker| marker == expected_fingerprint)
+        && system_skills_dir_complete(&SYSTEM_SKILLS_DIR, &dest_system)
     {
         return Ok(());
     }
@@ -141,6 +142,25 @@ fn collect_fingerprint_items(dir: &Dir<'_>, items: &mut Vec<(String, Option<u64>
             }
         }
     }
+}
+
+fn system_skills_dir_complete(dir: &Dir<'_>, dest: &AbsolutePathBuf) -> bool {
+    for entry in dir.entries() {
+        match entry {
+            include_dir::DirEntry::Dir(subdir) => {
+                if !system_skills_dir_complete(subdir, dest) {
+                    return false;
+                }
+            }
+            include_dir::DirEntry::File(file) => {
+                let path = dest.join(file.path());
+                if !path.as_path().is_file() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Writes the embedded `include_dir::Dir` to disk under `dest`.
@@ -212,6 +232,31 @@ mod tests {
             paths
                 .binary_search_by(|probe| probe.as_str().cmp("skill-creator/scripts/init_skill.py"))
                 .is_ok()
+        );
+    }
+
+    #[test]
+    fn install_system_skills_repairs_missing_files_with_matching_marker() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let codex_home =
+            codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path_checked(temp_dir.path())
+                .expect("abs");
+
+        // 1. Initial install
+        super::install_system_skills(&codex_home).expect("initial install succeeds");
+        let system_dir = super::system_cache_root_dir(&codex_home);
+        let missing_file = system_dir.join("skill-creator/SKILL.md");
+        assert!(missing_file.as_path().is_file());
+
+        // 2. Delete one file while keeping the marker intact
+        std::fs::remove_file(missing_file.as_path()).expect("delete file");
+        assert!(!missing_file.as_path().exists());
+
+        // 3. Rerun install_system_skills: should detect incomplete cache and repair it
+        super::install_system_skills(&codex_home).expect("repair install succeeds");
+        assert!(
+            missing_file.as_path().is_file(),
+            "missing system skill file should be restored"
         );
     }
 }
