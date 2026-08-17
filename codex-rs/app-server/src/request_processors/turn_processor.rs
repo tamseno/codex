@@ -737,49 +737,58 @@ impl TurnRequestProcessor {
         let approvals_reviewer =
             approvals_reviewer.map(codex_app_server_protocol::ApprovalsReviewer::to_core);
         let sandbox_policy = sandbox_policy.map(|policy| policy.to_core());
-        let (permission_profile, active_permission_profile, profile_workspace_roots) =
-            if let Some(permissions) = permissions {
-                let Some(snapshot) = snapshot.as_ref() else {
-                    return Err(internal_error(format!(
-                        "{method} permission selection missing thread snapshot"
-                    )));
-                };
-                let overrides = ConfigOverrides {
-                    cwd: environments
-                        .as_ref()
-                        .map(|environments| environments.legacy_fallback_cwd.to_path_buf()),
-                    default_permissions: Some(permissions),
-                    codex_linux_sandbox_exe: self.arg0_paths.codex_linux_sandbox_exe.clone(),
-                    main_execve_wrapper_exe: self.arg0_paths.main_execve_wrapper_exe.clone(),
-                    ..Default::default()
-                };
-                let config = self
-                    .config_manager
-                    .load_for_cwd(
-                        /*request_overrides*/ None,
-                        overrides,
-                        Some(snapshot.cwd().to_path_buf()),
-                    )
-                    .await
-                    .map_err(|err| config_load_error(&err))?;
-                // Startup config is allowed to fall back when requirements
-                // disallow a configured profile. An explicit settings update
-                // is different: reject it before accepting the request.
-                if let Some(warning) = config.startup_warnings.iter().find(|warning| {
-                    warning.contains("Configured value for `permission_profile` is disallowed")
-                }) {
-                    return Err(invalid_request(format!(
-                        "invalid thread settings override: {warning}"
-                    )));
-                }
-                (
-                    Some(config.permissions.permission_profile().clone()),
-                    config.permissions.active_permission_profile(),
-                    Some(config.permissions.profile_workspace_roots().to_vec()),
-                )
-            } else {
-                (None, None, None)
+        let (
+            permission_profile,
+            active_permission_profile,
+            profile_workspace_roots,
+            fallback_approvals_reviewer,
+            fallback_approval_policy,
+        ) = if let Some(permissions) = permissions {
+            let Some(snapshot) = snapshot.as_ref() else {
+                return Err(internal_error(format!(
+                    "{method} permission selection missing thread snapshot"
+                )));
             };
+            let overrides = ConfigOverrides {
+                cwd: environments
+                    .as_ref()
+                    .map(|environments| environments.legacy_fallback_cwd.to_path_buf()),
+                default_permissions: Some(permissions),
+                codex_linux_sandbox_exe: self.arg0_paths.codex_linux_sandbox_exe.clone(),
+                main_execve_wrapper_exe: self.arg0_paths.main_execve_wrapper_exe.clone(),
+                ..Default::default()
+            };
+            let config = self
+                .config_manager
+                .load_for_cwd(
+                    /*request_overrides*/ None,
+                    overrides,
+                    Some(snapshot.cwd().to_path_buf()),
+                )
+                .await
+                .map_err(|err| config_load_error(&err))?;
+            // Startup config is allowed to fall back when requirements
+            // disallow a configured profile. An explicit settings update
+            // is different: reject it before accepting the request.
+            if let Some(warning) = config.startup_warnings.iter().find(|warning| {
+                warning.contains("Configured value for `permission_profile` is disallowed")
+            }) {
+                return Err(invalid_request(format!(
+                    "invalid thread settings override: {warning}"
+                )));
+            }
+            (
+                Some(config.permissions.permission_profile().clone()),
+                config.permissions.active_permission_profile(),
+                Some(config.permissions.profile_workspace_roots().to_vec()),
+                Some(config.approvals_reviewer),
+                Some(config.permissions.approval_policy.value()),
+            )
+        } else {
+            (None, None, None, None, None)
+        };
+        let approvals_reviewer = approvals_reviewer.or(fallback_approvals_reviewer);
+        let approval_policy = approval_policy.or(fallback_approval_policy);
         let effort = effort.map(Some);
 
         if has_any_overrides {

@@ -393,3 +393,55 @@ async fn thread_settings_update_enforces_global_reviewer_requirements() -> Resul
         .await?;
     assert_error(&mut server, id, "approvals_reviewer").await
 }
+
+#[tokio::test]
+async fn permissions_update_resets_stale_approvals_reviewer_override() -> Result<()> {
+    let home = TempDir::new()?;
+    let config = MockResponsesConfig::new("http://localhost/unused")
+        .with_approval_policy("on-request")
+        .with_root_config(
+            r#"approvals_reviewer = "auto_review"
+
+[permissions.dev]
+description = "Dev profile"
+"#,
+        );
+    config.write(home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized_with_timeout(TIMEOUT)
+        .await?;
+
+    let thread = server.start_thread(StartParams::default()).await?;
+    assert_eq!(thread.approvals_reviewer, AutoReview);
+
+    // 1. Switch to Full Access: explicitly set approvals_reviewer = User
+    let id = server
+        .send_thread_settings_update_request(params!(
+            UpdateParams,
+            thread_id = thread.thread.id.clone(),
+            approvals_reviewer = Some(User),
+            approval_policy = Some(Never),
+        ))
+        .await?;
+    let _response: UpdateResponse = timeout(TIMEOUT, server.read_response(id)).await??;
+    let updated: SettingsUpdated =
+        timeout(TIMEOUT, server.read_notification("thread/settings/updated")).await??;
+    assert_eq!(updated.thread_settings.approvals_reviewer, User);
+
+    // 2. Switch back to custom permissions profile without explicit approvals_reviewer:
+    // Should restore auto_review from config instead of leaking User
+    let id = server
+        .send_thread_settings_update_request(params!(
+            UpdateParams,
+            thread_id = thread.thread.id.clone(),
+            permissions = Some("dev".to_string()),
+        ))
+        .await?;
+    let _response: UpdateResponse = timeout(TIMEOUT, server.read_response(id)).await??;
+    let updated: SettingsUpdated =
+        timeout(TIMEOUT, server.read_notification("thread/settings/updated")).await??;
+    assert_eq!(updated.thread_settings.approvals_reviewer, AutoReview);
+
+    Ok(())
+}
