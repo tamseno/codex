@@ -8038,3 +8038,30 @@ async fn side_backtrack_rejection_reports_unavailable_message_snapshot() {
 async fn start_config_write_test_app_server(app: &App) -> Result<AppServerSession> {
     Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await
 }
+
+#[tokio::test]
+async fn update_approvals_reviewer_skips_write_when_unchanged() -> Result<()> {
+    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let mut app_server = start_config_write_test_app_server(&app).await?;
+    app.config.approvals_reviewer = ApprovalsReviewer::User;
+
+    while app_event_rx.try_recv().is_ok() {}
+
+    app.handle_event(
+        &mut tui,
+        &mut app_server,
+        AppEvent::UpdateApprovalsReviewer(ApprovalsReviewer::User),
+    )
+    .await?;
+
+    assert_eq!(app.config.approvals_reviewer, ApprovalsReviewer::User);
+    let events = std::iter::from_fn(|| app_event_rx.try_recv().ok()).collect::<Vec<_>>();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, AppEvent::InsertHistoryCell(_))),
+        "expected no error cell when reviewer is unchanged: {events:?}"
+    );
+    Ok(())
+}

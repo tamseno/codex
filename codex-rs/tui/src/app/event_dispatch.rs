@@ -2163,25 +2163,27 @@ impl App {
                 }
             }
             AppEvent::UpdateApprovalsReviewer(policy) => {
+                let previous_reviewer = self.config.approvals_reviewer;
                 self.config.approvals_reviewer = policy;
                 self.chat_widget.set_approvals_reviewer(policy);
                 self.sync_active_thread_permission_settings_to_cached_session()
                     .await;
-                if let Err(err) = crate::config_update::write_config_batch(
-                    app_server.request_handle(),
-                    vec![crate::config_update::replace_config_value(
-                        "approvals_reviewer",
-                        serde_json::json!(policy.to_string()),
-                    )],
-                )
-                .await
+                if previous_reviewer != policy
+                    && let Err(err) = crate::config_update::write_config_batch(
+                        app_server.request_handle(),
+                        vec![crate::config_update::replace_config_value(
+                            "approvals_reviewer",
+                            serde_json::json!(policy.to_string()),
+                        )],
+                    )
+                    .await
                 {
                     tracing::error!(
                         error = %err,
                         "failed to persist approvals reviewer update"
                     );
                     self.chat_widget
-                        .add_error_message(format!("Failed to save approvals reviewer: {err}"));
+                        .add_error_message(format!("Failed to save approvals reviewer: {err:#}"));
                 }
             }
             AppEvent::UpdateFeatureFlags { updates } => {
